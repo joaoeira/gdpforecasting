@@ -1,5 +1,5 @@
 ---
-title: "R Notebook"
+title: "Automated Model Selection for GDP Growth Forecasting"
 output:
   pdf_document: default
   html_document:
@@ -23,7 +23,7 @@ The goals for this project were as follows:
 The data used was retrieved from the *GDP and main components (output, expenditure, and income)* database from Eurostat's website. It includes quarterly GDP data from 2005Q1 to 2016Q from 30 European countries. 
 
 
-```{r}
+```{r include=FALSE}
 library(tidyverse)
 library(knitr)
 library(forecast)
@@ -329,7 +329,7 @@ An upgrade that I want to do in the future is to parallelize the procedure such 
 
 
 ```{r}
-models <- lapply(corrected_ts,model_selection,nonseasonal = 0,seasonal = 0)  
+models <- lapply(corrected_ts,model_selection,nonseasonal = 1,seasonal = 2)  
 ```
 
 
