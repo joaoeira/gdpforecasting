@@ -1,0 +1,238 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+TODO
+- create_ts should have start parameter based on length
+  - upgrade should be given an arbitrary year and quarter, based on length, create appropriate ts
+- parallel workload
+- analisar determinantes de prediction error
+
+```{r}
+library(tidyverse)
+library(forecast)
+library(strucchange)
+library(rbenchmark)
+options(scipen=999)
+```
+
+```{r}
+#ORIGINAL DATA
+countrydata <- read_csv("~/Dropbox/Data/GDP Forecasting/GDP Forecasting/namq_10_gdp_1_Data.csv")
+```
+
+```{r}
+#HELPER FUNCTIONS
+create_ts_i <- function(df){
+  #creates ts object with proper start date based on length of list
+  #ATTENTION THIS IS ONLY FOR THE INITIAL REMOVAL OF VALUES FROM THE CSV 
+  ts(as.data.frame(df$Value), start=c(2005,1),frequency=4)
+}
+
+create_ts <- function(df){
+  #creates ts object with proper start date based on length of list
+  df <- unlist(df)
+  year <- 2016 - as.integer(length(df)/4)
+  if((round(length(df)/4) - length(df)/4) == 0.25){
+    quarter <- 2
+  }
+  else if((round(length(df)/4) - length(df)/4) == 0.5){
+    quarter <- 3
+  }
+  else if((round(length(df)/4) - length(df)/4) == 0){
+    quarter <- 1
+  }
+  else{quarter <- 4}
+  return(ts(as.data.frame(df), start=c(year,quarter),frequency=4))
+}
+
+percentagechange <-function(timeseries){
+  #growth rate
+  (diff(timeseries,1)/timeseries[-c(1)])*100
+}
+
+boxcox_ts <- function(df){
+  #box cox transformation
+  BoxCox(df,BoxCox.lambda(df))
+}
+
+boxcox_lambda <- function(df){
+  BoxCox.lambda(df)
+}
+
+inv_boxcox_ts <- function(x, lambda) 
+    if (lambda == 0) exp(x) else (lambda*x + 1)^(1/lambda) 
+
+ts_breakpoints <- function(df){
+  #given a time series, returns subset from last breakpoint onward
+  df <-unlist(df)
+  bp_gdp <- breakpoints(df ~ 1)
+  if(is.na(bp_gdp$breakpoints)){
+    return(df)
+  }
+  else{
+  return(df[-c(1:bp_gdp$breakpoints[length(bp_gdp$breakpoints)])])
+  }
+}
+
+model_selection <- function(df,nonseasonal,seasonal){
+  arima.cverrors <- data.frame()
+  for(p in 0:nonseasonal){
+    for(d in 0:nonseasonal){
+      for(q in 0:nonseasonal){
+        for(P in 0:seasonal){
+          for(D in 0:seasonal){
+            for(Q in 0:seasonal){
+              cvarima <- function(x,h){forecast(arima(x, order=c(p,d,q), seasonal=c(P,D,Q)),h=h)}
+              cverror <- tsCV(create_ts(unlist(df)),cvarima,h=4)
+              arima.cverrors <- rbind(arima.cverrors,c(sqrt(mean(cverror^2,na.rm=TRUE)),mean(abs(cverror),na.rm = TRUE),c(p,d,q,P,D,Q)))
+            }
+          }
+        }
+      }
+    }
+  }
+  colnames(arima.cverrors) <- c("RMSE","MAE","p","d","q","P","D","Q")
+  arima.cverrors[which.min(arima.cverrors$RMSE),]
+}
+```
+
+```{r}
+#NESTED DATA
+by_country  <- countrydata %>%
+  select(GEO,TIME,Value) %>%
+  group_by(GEO)%>%
+  nest()
+
+by_country$GEO[5] <- "Germany"
+```
+
+```{r, message=FALSE, warning=FALSE}
+#TRANSFORMATIONS 
+
+ts_country <- lapply(by_country$data,create_ts_i) #turn values into a time series 
+boxcox_ts <- lapply(ts_country,boxcox_ts) #apply a box-cox transformation to all those series
+lambdas <- lapply(ts_country,boxcox_lambda) #so that latter can perform inverse transformation of the forecasted values
+growth_ts <- lapply(boxcox_ts,percentagechange) #calculate a growth rate for that transformed series
+corrected_ts <- lapply(growth_ts,ts_breakpoints)
+```
+
+
+```{r}
+countrynames <- unique(countrydata$GEO)
+countrynames[5] <- "Germany"
+```
+
+```{r}
+models <- lapply(corrected_ts,model_selection,seasonal = 2,nonseasonal = 1)  
+ggplot(mapping=aes(x=sapply(corrected_ts,length),y=sapply(models,unlist)[1,]))+
+  geom_point()+
+  geom_smooth(method = "loess")
+```
+
+```{r}
+
+forecast_values <- function(ts,df){
+  lastvalue <- ts[length(ts)]
+  q1 <- lastvalue*(1+df[1]/100)
+  q2 <- q1*(1+df[2]/100)
+  q3 <- q2*(1+df[3]/100)
+  q4 <- q3*(1+df[4]/100)
+  c(q1,q2,q3,q4)
+}
+
+
+
+
+for(i in 1:30){
+  timeseries <- create_ts(corrected_ts[i])
+  model <- unlist(models[i])
+  forecast <- forecast(arima(timeseries,
+                 order=c(model[3],model[4],model[5]),
+                 seasonal = c(model[6],model[7],model[8]),
+                 method="ML"),
+                 h=4)
+  
+  forecastvalues <- forecast_values(unlist(boxcox_ts[i]),forecast$mean)
+  
+  autoplot(create_ts(boxcox_ts[i]),series="Data", main = countrynames[i])+
+    autolayer(ts(forecastvalues,start=c(2017,1)),series="Forecast")
+                  
+  ggsave(paste("autoplot_forecast_",countrynames[i],".png",sep = ""))
+}
+
+for(i in 1:30){ 
+  timeseries <- create_ts(corrected_ts[i])
+  model <- unlist(models[i])
+  forecast <- forecast(arima(timeseries,
+                 order=c(model[3],model[4],model[5]),
+                 seasonal = c(model[6],model[7],model[8]),
+                 method="ML"),
+                 h=4)
+  
+  forecastvalues <- forecast_values(unlist(boxcox_ts[i]),forecast$mean)
+  
+  autoplot(ts(c(inv_boxcox_ts(unlist(boxcox_ts[i]),unlist(lambdas[i])),
+                inv_boxcox_ts(forecastvalues,unlist(lambdas[i]))),
+                start = c(2005,1),frequency = 4),ylab = "Real GDP", main = countrynames[i])
+  
+  ggsave(paste("autoplot_realgdp2005-2017_",countrynames[i],".png",sep = ""))
+}
+
+for(i in 1:30){
+  timeseries <- create_ts(corrected_ts[i])
+  model <- unlist(models[i])
+  forecast <- forecast(arima(timeseries,
+                 order=c(model[3],model[4],model[5]),
+                 seasonal = c(model[6],model[7],model[8]),
+                 method="ML"),
+                 h=4)
+  forecastvalues <- forecast_values(unlist(boxcox_ts[i]),forecast$mean)
+  assign(countrynames[i],ts(inv_boxcox_ts(forecastvalues,unlist(lambdas[i])),start=c(2017,1),frequency = 4))
+}
+
+```
+
+2017Q1
+
+```{r, message=FALSE, warning=FALSE}
+Q1_2017<- read_csv("~/Dropbox/Data/GDP Forecasting/GDP Forecasting/2017_Q1_Data.csv")
+Q1_2017 <- Q1_2017$Value
+
+
+prediction_error <- c(1:30)
+for(i in 1:30){
+  timeseries <- create_ts(corrected_ts[i])
+  model <- unlist(models[i])
+  forecast <- forecast(arima(timeseries,
+                 order=c(model[3],model[4],model[5]),
+                 seasonal = c(model[6],model[7],model[8]),
+                 method="ML"),
+                 h=4)
+  forecastvalues <- forecast_values(unlist(boxcox_ts[i]),forecast$mean)
+  prediction <- ts(inv_boxcox_ts(forecastvalues,unlist(lambdas[i])),start=c(2017,1),frequency = 4)
+  prediction_error[i] <- (as.double(Q1_2017[i])/prediction[1] - 1)
+}
+
+
+```
+
+```{r}
+for(i in 1:30){
+  timeseries <- create_ts(corrected_ts[i])
+  model <- unlist(models[i])
+  forecast <- forecast(arima(timeseries,
+                 order=c(model[3],model[4],model[5]),
+                 seasonal = c(model[6],model[7],model[8]),
+                 method="ML"),
+                 h=4)
+  growth <- percentchange(c(forecast$mean[1],as.double(Q1_2017[i])))
+  print(gr)
+  }
+```
+
+
