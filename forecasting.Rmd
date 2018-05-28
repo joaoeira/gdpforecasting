@@ -577,6 +577,11 @@ kable(head(lower_errors))
 
 # Conclusion
 
+The main strength of the procedure I followed here is that it is quite cheap in terms of its complexity and the data gathering efforts needed for the accuracy you end up getting. No central bank would dare to use it in their forecasts since, for their lofty purposes, the diminishing returns of more complex methods are more than worth the extra resources needed, but this procedure could still be used as a kind of sanity check to see if that extra investment is worth it if the difference in accuracy is insignificant from the more simple, and considerably cheaper, method.
+
+There's also ways you could make this procedure cheaper in computational terms. I previously mentioned a multi-core upgrade that could be implememented (and which I hope to do soon), but one other issue with the procedure is that the cross-validation step takes into account the full dataset when it likely doesn't need to. The idea is that the model fitted with data ranging from 2010Q1 to 2016Q4 might have better forecasting performance for 2017 than the model fitted with data from 2005Q1 to 2016Q4. This extra data that we are dealing with not only might be hindering the forecasting accuracy we are getting - though that's an hypothesis, we would have to check, - but it also means that each cross-validation step needs longer to run. That is, a shorter timeframe of the data used is also a consideration to keep in mind in the speed-accuracy tradeoff, not only the interval range of the parameters used.
+
+All in all, I am quite satisfied with the project.
 
 
 
